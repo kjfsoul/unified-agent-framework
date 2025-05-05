@@ -1,13 +1,13 @@
-import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import express from 'express';
 import { setupRoutes } from './api';
+import { initializeBrands } from './brands';
+import { errorHandler } from './core/errors';
+import { setupLogger } from './core/logger';
 import { initializeDatabase } from './db';
 import { initializeOrchestrator } from './orchestrator';
 import { initializeRegistry } from './registry';
-import { initializeBrands } from './brands';
-import { setupLogger } from './core/logger';
-import { errorHandler } from './core/errors';
 
 // Load environment variables
 dotenv.config();
@@ -18,44 +18,44 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use(setupLogger());
+app.use(express.urlencoded({ extended: true }));
 
-// Initialize all components
-async function initializeApp() {
+// Logging
+setupLogger(app);
+
+// Initialize components
+(async () => {
   try {
-    // Initialize components in order
-    console.log('Initializing Unified Agent Framework...');
-    
-    // 1. Database
+    // Initialize database connection
     await initializeDatabase();
-    
-    // 2. Brands
-    await initializeBrands();
-    
-    // 3. Registry
+    console.log('Database connection established');
+
+    // Initialize agent registry
     await initializeRegistry();
-    
-    // 4. Orchestrator
+    console.log('Agent registry initialized');
+
+    // Initialize brand configurations
+    await initializeBrands();
+    console.log('Brand configurations loaded');
+
+    // Initialize task orchestrator
     await initializeOrchestrator();
-    
-    // 5. Routes
+    console.log('Task orchestrator initialized');
+
+    // Setup API routes
     setupRoutes(app);
-    
-    // 6. Error handler
+
+    // Error handling middleware
     app.use(errorHandler);
-    
+
     // Start server
     app.listen(PORT, () => {
       console.log(`Unified Agent Framework running on port ${PORT}`);
-      console.log(`API available at http://localhost:${PORT}/api`);
     });
   } catch (error) {
     console.error('Failed to initialize application:', error);
     process.exit(1);
   }
-}
-
-// Start the application
-initializeApp();
+})();
 
 export default app;

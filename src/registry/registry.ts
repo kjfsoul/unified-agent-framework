@@ -4,60 +4,72 @@ import { AgentLogger } from '../core/logger';
 export class AgentRegistry {
   private agents: Map<string, BaseAgent> = new Map();
   private logger = new AgentLogger('AgentRegistry');
-  
+
   /**
    * Register an agent with the registry
    */
   public registerAgent(agent: BaseAgent): void {
-    const agentInfo = agent.getInfo();
+    const agentInfo = agent.getConfig();
     this.agents.set(agentInfo.id, agent);
     this.logger.info(`Registered agent: ${agentInfo.name} (${agentInfo.id})`);
   }
-  
+
   /**
-   * Find an agent that can execute a specific task type
+   * Get an agent by ID
    */
-  public findAgentForTask(taskType: string): BaseAgent | null {
-    for (const agent of this.agents.values()) {
-      if (agent.canExecute(taskType)) {
-        return agent;
-      }
-    }
-    
-    this.logger.warn(`No agent found for task type: ${taskType}`);
-    return null;
+  public getAgent(agentId: string): BaseAgent | undefined {
+    return this.agents.get(agentId);
   }
-  
+
   /**
    * Get all registered agents
    */
   public getAllAgents(): BaseAgent[] {
     return Array.from(this.agents.values());
   }
-  
+
   /**
-   * Get agent by ID
+   * Get agents by capability
    */
-  public getAgentById(agentId: string): BaseAgent | null {
-    return this.agents.get(agentId) || null;
+  public getAgentsByCapability(capability: string): BaseAgent[] {
+    return this.getAllAgents().filter(agent => 
+      agent.hasCapability(capability)
+    );
   }
-  
+
+  /**
+   * Find agents that match a set of required capabilities
+   */
+  public findAgentsByCapabilities(capabilities: string[]): BaseAgent[] {
+    return this.getAllAgents().filter(agent => 
+      capabilities.every(capability => agent.hasCapability(capability))
+    );
+  }
+
+  /**
+   * Check if an agent is registered
+   */
+  public hasAgent(agentId: string): boolean {
+    return this.agents.has(agentId);
+  }
+
+  /**
+   * Get the count of registered agents
+   */
+  public getAgentCount(): number {
+    return this.agents.size;
+  }
+
   /**
    * Remove an agent from the registry
    */
   public unregisterAgent(agentId: string): boolean {
-    const agent = this.agents.get(agentId);
+    const agent = this.getAgent(agentId);
     if (agent) {
-      this.logger.info(`Unregistered agent: ${agent.getInfo().name} (${agentId})`);
+      this.agents.delete(agentId);
+      this.logger.info(`Unregistered agent: ${agent.getConfig().name} (${agentId})`);
+      return true;
     }
-    return this.agents.delete(agentId);
+    return false;
   }
 }
-
-// Create singleton instance
-export const registry = new AgentRegistry();
-
-export default {
-  AgentRegistry,
-  registry
-};

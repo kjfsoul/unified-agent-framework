@@ -1,4 +1,4 @@
-import { AgentRegistry, registry } from './registry';
+import { AgentRegistry } from './registry';
 
 /**
  * Initialize the agent registry
@@ -10,6 +10,9 @@ export async function initializeRegistry(): Promise<void> {
   const { registerAgents } = await import('../agents');
   registerAgents();
 }
+
+// Export registry singleton
+export const registry = new AgentRegistry();
 
 export {
   AgentRegistry,

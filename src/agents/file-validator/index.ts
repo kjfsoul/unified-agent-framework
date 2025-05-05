@@ -1,6 +1,6 @@
-import { BaseAgent, TaskContext } from '../../core/agent';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { BaseAgent, TaskContext } from '../../core/agent';
 
 interface FileValidationResult {
   valid: boolean;
@@ -22,6 +22,37 @@ export class FileValidatorAgent extends BaseAgent {
       version: '1.0.0',
       capabilities: ['validateFile', 'validateTarotDeck', 'validateDirectory']
     });
+  }
+  
+  /**
+   * Validate task input specifically for this agent
+   */
+  protected async validateTaskContext(context: TaskContext): Promise<void> {
+    // Call parent validation first
+    await super.validateTaskContext(context);
+
+    const { taskType, parameters } = context;
+    
+    // Validate based on task type
+    switch (taskType) {
+      case 'validateFile':
+        if (!parameters.filePath) {
+          throw new Error('File path is required for validateFile task');
+        }
+        break;
+      case 'validateTarotDeck':
+        if (!parameters.deckId || !parameters.basePath) {
+          throw new Error('Deck ID and base path are required for validateTarotDeck task');
+        }
+        break;
+      case 'validateDirectory':
+        if (!parameters.directoryPath) {
+          throw new Error('Directory path is required for validateDirectory task');
+        }
+        break;
+      default:
+        throw new Error(`Unsupported task type: ${taskType}`);
+    }
   }
   
   /**
@@ -65,7 +96,7 @@ export class FileValidatorAgent extends BaseAgent {
    */
   private async validateFile(context: TaskContext): Promise<FileValidationResult> {
     const { executionId, parameters } = context;
-    const { filePath, rules } = parameters;
+    const { filePath, rules, maxSizeBytes, allowedExtensions, requiredContent } = parameters;
     
     if (!filePath) {
       throw new Error('File path is required');
@@ -75,10 +106,25 @@ export class FileValidatorAgent extends BaseAgent {
     
     try {
       // Check if file exists
-      const stats = await fs.stat(filePath);
-      
-      if (!stats.isFile()) {
-        throw new Error(`Path is not a file: ${filePath}`);
+      let stats;
+      try {
+        stats = await fs.stat(filePath);
+        
+        if (!stats.isFile()) {
+          throw new Error(`Path is not a file: ${filePath}`);
+        }
+      } catch (error) {
+        return {
+          valid: false,
+          errors: [`File does not exist or cannot be accessed: ${filePath}`],
+          warnings: [],
+          fileInfo: {
+            name: path.basename(filePath),
+            size: 0,
+            extension: path.extname(filePath),
+            lastModified: new Date().toISOString()
+          }
+        };
       }
       
       // Get file info
@@ -89,12 +135,42 @@ export class FileValidatorAgent extends BaseAgent {
         lastModified: stats.mtime.toISOString()
       };
       
-      // Validate file based on extension
+      // Initialize validation results
       const errors: string[] = [];
       const warnings: string[] = [];
       
+      // Validate file size if specified
+      if (maxSizeBytes && stats.size > maxSizeBytes) {
+        errors.push(`File size exceeds maximum allowed: ${stats.size} bytes > ${maxSizeBytes} bytes`);
+      }
+      
+      // Validate extension if specified
+      if (allowedExtensions && Array.isArray(allowedExtensions) && allowedExtensions.length > 0) {
+        const fileExtension = fileInfo.extension.toLowerCase();
+        const normalizedAllowedExtensions = allowedExtensions.map(ext => 
+          ext.startsWith('.') ? ext.toLowerCase() : `.${ext.toLowerCase()}`
+        );
+        
+        if (!normalizedAllowedExtensions.includes(fileExtension)) {
+          errors.push(`File extension "${fileExtension}" is not allowed. Allowed extensions: ${normalizedAllowedExtensions.join(', ')}`);
+        }
+      }
+      
       // Read file content
       const content = await fs.readFile(filePath, 'utf8');
+      
+      // Validate required content if specified
+      if (requiredContent) {
+        if (Array.isArray(requiredContent)) {
+          for (const requiredString of requiredContent) {
+            if (!content.includes(requiredString)) {
+              errors.push(`Required content "${requiredString}" not found in file`);
+            }
+          }
+        } else if (typeof requiredContent === 'string' && !content.includes(requiredContent)) {
+          errors.push(`Required content "${requiredContent}" not found in file`);
+        }
+      }
       
       // Validate based on file type
       switch (fileInfo.extension.toLowerCase()) {
@@ -116,6 +192,11 @@ export class FileValidatorAgent extends BaseAgent {
       // Apply custom rules if provided
       if (rules && Array.isArray(rules)) {
         this.applyCustomRules(content, rules, errors, warnings);
+      }
+      
+      // If file is larger than 10MB, add a warning
+      if (stats.size > 10 * 1024 * 1024) {
+        warnings.push('File is larger than 10MB. This may cause performance issues when processing.');
       }
       
       return {

@@ -1,7 +1,7 @@
-import { v4 as uuidv4 } from 'uuid';
-import { AgentLogger } from './logger';
 import { SupabaseClient } from '@supabase/supabase-js';
+import { v4 as uuidv4 } from 'uuid';
 import { getSupabaseClient } from '../db/client';
+import { AgentLogger } from './logger';
 
 export interface AgentConfig {
   name: string;
@@ -14,13 +14,28 @@ export interface TaskContext {
   executionId: string;
   taskType: string;
   brand?: string;
+  userId?: string;
   parameters: Record<string, any>;
   priority: string;
   brandConfig?: any;
   taskConfig?: any;
+  metadata?: Record<string, any>;
 }
 
-export class BaseAgent {
+export interface TaskResult {
+  success: boolean;
+  output: Record<string, any>;
+  error?: {
+    code: string;
+    message: string;
+    details?: Record<string, any>;
+  };
+}
+
+/**
+ * Base Agent class that all specific agents should extend
+ */
+export abstract class BaseAgent {
   protected id: string;
   protected name: string;
   protected description: string;
@@ -60,10 +75,95 @@ export class BaseAgent {
   }
   
   /**
+   * Validates the incoming task context before execution
+   */
+  protected async validateTaskContext(context: TaskContext): Promise<void> {
+    // Base validation that all agents should perform
+    if (!context.taskType) {
+      throw new Error('Task type is required');
+    }
+
+    if (!context.parameters) {
+      throw new Error('Task parameters are required');
+    }
+
+    // Each agent implementation should extend this with specific validation
+  }
+  
+  /**
    * Execute a task (must be implemented by derived agents)
    */
-  public async executeTask(context: TaskContext): Promise<any> {
-    throw new Error('Method not implemented. Derived agents must implement executeTask');
+  public abstract executeTask(context: TaskContext): Promise<any>;
+  
+  /**
+   * Main entry point for task handling with error handling and metrics
+   */
+  public async handleTask(context: TaskContext): Promise<TaskResult> {
+    // Ensure we have an execution ID
+    if (!context.executionId) {
+      context.executionId = uuidv4();
+    }
+
+    const startTime = Date.now();
+
+    try {
+      // Log task start
+      this.logger.info(`Starting task execution`, {
+        executionId: context.executionId,
+        taskType: context.taskType,
+        brand: context.brand
+      });
+
+      // Validate the task context
+      await this.validateTaskContext(context);
+      
+      // Update status to running
+      await this.updateTaskStatus(context.executionId, 'running');
+
+      // Execute the task (implemented by specific agent)
+      const result = await this.executeTask(context);
+
+      // Calculate duration
+      const durationMs = Date.now() - startTime;
+
+      // Log task completion
+      this.logger.info(`Task execution completed`, {
+        executionId: context.executionId,
+        durationMs
+      });
+
+      // Update status to completed
+      await this.updateTaskStatus(context.executionId, 'completed', result);
+
+      return {
+        success: true,
+        output: result
+      };
+    } catch (error) {
+      // Calculate duration even for errors
+      const durationMs = Date.now() - startTime;
+
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      
+      // Log task failure
+      this.logger.error(`Task execution failed: ${errorMessage}`, {
+        executionId: context.executionId,
+        durationMs
+      });
+
+      // Update status to failed
+      await this.updateTaskStatus(context.executionId, 'failed', null, errorMessage);
+
+      return {
+        success: false,
+        output: {},
+        error: {
+          code: 'EXECUTION_ERROR',
+          message: errorMessage,
+          details: { stack: error instanceof Error ? error.stack : undefined }
+        }
+      };
+    }
   }
   
   /**
